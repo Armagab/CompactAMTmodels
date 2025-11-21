@@ -19,13 +19,13 @@ def get_piano_roll(midi_path, sr, hop_length):
     return (roll > 0).astype(np.float32)
 
 
-def predict(model, audio, device):
+def predict(model, audio, n_bins, sr, hop, device):
     
-    if N_FREQ_BINS == 229:
-        S = librosa.feature.melspectrogram(y=audio, sr=SR, n_fft=2048, hop_length=HOP_LENGTH, n_mels=N_FREQ_BINS)
+    if n_bins == 229:
+        S = librosa.feature.melspectrogram(y=audio, sr=sr, n_fft=2048, hop_length=hop, n_mels=n_bins)
         S_db = librosa.power_to_db(S, ref=np.max)
     else:
-        C = librosa.cqt(y=audio, sr=SR, hop_length=HOP_LENGTH, n_bins=N_FREQ_BINS, bins_per_octave=36)
+        C = librosa.cqt(y=audio, sr=sr, hop_length=hop, n_bins=n_bins, bins_per_octave=36)
         S_db = librosa.amplitude_to_db(np.abs(C), ref=np.max)
     
 
@@ -44,7 +44,7 @@ def predict(model, audio, device):
     return probs.squeeze(0).T.cpu().numpy(), S_db
 
 
-def plot_comparison(spectrogram, pred_roll, gt_roll, sr, hop_length):
+def plot_comparison(spectrogram, pred_roll, gt_roll, sr, hop_length, threshold):
 
     min_len = min(spectrogram.shape[1], pred_roll.shape[1], gt_roll.shape[1], 2000)
     spectrogram = spectrogram[:, :min_len]
@@ -66,7 +66,7 @@ def plot_comparison(spectrogram, pred_roll, gt_roll, sr, hop_length):
     # 2. Predicted Piano Roll
     plt.subplot(3, 1, 2)
     
-    pred_binary = (pred_roll > THRESHOLD).astype(float)
+    pred_binary = (pred_roll > threshold).astype(float)
     
     plt.imshow(pred_binary, aspect='auto', origin='lower',
                extent=[times[0], times[-1], note_range[0], note_range[1]],
@@ -88,7 +88,7 @@ def plot_comparison(spectrogram, pred_roll, gt_roll, sr, hop_length):
     plt.show()
 
 
-def measure_efficiency(model, device='cpu', duration_sec=60):
+def measure_efficiency(model, device='cpu', duration_sec=60, sr=22050, hop=512, n_bins=229):
     """
     Measures model parameters, FLOPS и inference time for one minute of audio.
     """
@@ -96,8 +96,8 @@ def measure_efficiency(model, device='cpu', duration_sec=60):
     model.eval()
     
     
-    frames_count = int(duration_sec * 22050 / 512)
-    dummy_input = torch.randn(1, 1, 229, frames_count).to(device) # 229 mel bins
+    frames_count = int(duration_sec * sr / hop)
+    dummy_input = torch.randn(1, 1, n_bins, frames_count).to(device)
     
     # Parameters
     total_params = sum(p.numel() for p in model.parameters())
@@ -133,7 +133,7 @@ def measure_efficiency(model, device='cpu', duration_sec=60):
     print(f"Trainable Params: {trainable_params:,}")
     print(f"MACs (FLOPs/2): {macs_str}")
     print(f"Avg Inference Time: {avg_time:.4f} sec")
-    print(f"Real-Time Factor (RTF): {rtf:.4f} (Lower is better)")
+    print(f"Real-Time Factor (RTF): {rtf:.4f}")
     print(f"Speedup vs Real-time: {1/rtf:.1f}x")
     
     return {
